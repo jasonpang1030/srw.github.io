@@ -9,4 +9,4 @@ initial_position,gp01_gundam,,,,,,,,,,,,,0,7,,,,,,,,,,,,,,,,,,,,,,,,,
 initial_position,shinning_gundam,,,,,,,,,,,,,7,2,,,,,,,,,,,,,,,,,,,,,,,,,
 condition,victory,,,,,,,,,,,,,,,captureAllPieces,消滅敵方旗艦「沙達拉恩號」,,,,,,,,,,,,,,,,,,,,,,,
 condition,defeat,,,,,,,,,,,,,,,turnLimit,我方旗艦「勞·卡拉姆號」被摧毀,,,,,,,,,,,,,,,,,,,,,,,
-event,,,,,,,,,,,,,,,,,,pieceEnterPosition,,,gundam,0,0,dialog,gundam,fa_gundam,TRUE,TRUE,,,確定,Change,Change,,,,,,,TRUE
+event,,,,,,,,,,,,,,,,,,pieceMove,,,gundam,0,0,upgradePiece,gundam,fa_gundam,TRUE,TRUE,,,確定,Change,Change,,,,,,,TRUE
