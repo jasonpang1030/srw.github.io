@@ -3379,11 +3379,16 @@
 
                 // 回合数增加时，停止战斗BGM，切换为boardbgm并从头播放
                 stopBattleBGM();
+
+                // 判断boardbgm状态，如果存在但被暂停，则恢复播放，不重置播放进度
                 if (boardBgmPlayer) {
-                    boardBgmPlayer.currentTime = 0; // 从头播放
-                    boardBgmPlayer.play().catch(err => {
-                        console.log('無法自動恢復關卡背景音樂:', err);
-                    });
+                    // 检查是否已暂停（paused属性为true表示当前已暂停）
+                    if (boardBgmPlayer.paused) {
+                        boardBgmPlayer.play().catch(err => {
+                            console.log('無法自動恢復關卡背景音樂:', err);
+                        });
+                    }
+                    // 如果已经在播放，则不做任何操作，让它继续播放
                 }
 
                 // 觸發回合開始事件
@@ -3875,7 +3880,9 @@
                             speedBase = 1.5; // 降低基值
                         }
 
+                        // 现在defenderSpeedPercent代表每秒移动多少百分比的容器宽度
                         const defenderSpeedPercent = (defenderPiece.dodge - 2) * speedMultiplier + speedBase;
+                        // 转换为每秒多少像素
                         combatMode.defenderSpeed = containerRect.width * (defenderSpeedPercent / 100);
 
                         // Update combat info panel
@@ -4112,15 +4119,19 @@
 
         // Start the defender movement to target
         function startDefenderMovement() {
-            // 添加10ms延迟，确保目标位置更新完全后再开始移动
-            setTimeout(() => {
-                combatMode.defenderMoving = true;
+            // 记录开始移动的时间
+            combatMode.moveStartTime = Date.now();
+            // 记录开始位置
+            combatMode.moveStartX = combatMode.defenderX;
+            combatMode.moveStartY = combatMode.defenderY;
 
-                // Reset defender movement after 200ms (was 500ms)
-                setTimeout(() => {
-                    combatMode.defenderMoving = false;
-                }, 200); // 200ms maximum move time as requested
-            }, 10);
+            // 设置移动状态
+            combatMode.defenderMoving = true;
+
+            // 仍然保留时间限制确保移动不会无限持续
+            setTimeout(() => {
+                combatMode.defenderMoving = false;
+            }, 200);
         }
 
         // Shooting laser (one shot only) - ENHANCED!
@@ -4349,37 +4360,47 @@
             }
 
             // Update defender position
+            // 更新防守者位置
             if (combatMode.defenderMoving && !combatMode.result) {
-                // Calculate direction vector
-                const dx = combatMode.defenderTargetX - combatMode.defenderX;
-                const dy = combatMode.defenderTargetY - combatMode.defenderY;
+                // 计算已经过的时间（毫秒）
+                const elapsedTime = Date.now() - combatMode.moveStartTime;
+
+                // 计算移动方向向量
+                const dx = combatMode.defenderTargetX - combatMode.moveStartX;
+                const dy = combatMode.defenderTargetY - combatMode.moveStartY;
                 const distance = Math.sqrt(dx * dx + dy * dy);
 
-                if (distance > 5) { // Stop moving when close to target
-                    // Normalize and apply speed
-                    const moveX = (dx / distance) * combatMode.defenderSpeed;
-                    const moveY = (dy / distance) * combatMode.defenderSpeed;
+                if (distance > 5) { // 如果距目标还有一段距离
+                    // 将速度从像素/帧转换为像素/秒
+                    const speedPerSecond = combatMode.defenderSpeed * 60; // 假设60FPS作为基准
 
-                    combatMode.defenderX += moveX;
-                    combatMode.defenderY += moveY;
+                    // 计算这段时间内应该移动的距离比例（0到1之间）
+                    // 200ms是最大移动时间，但可能提前到达目标
+                    const moveRatio = Math.min(elapsedTime / 200, 1.0);
 
-                    // Keep defender within bounds
+                    // 计算比例距离移动
+                    const moveDistance = Math.min(speedPerSecond * (elapsedTime / 1000), distance);
+                    const moveRatio2 = moveDistance / distance;
+
+                    // 使用平滑的基于时间的插值
+                    combatMode.defenderX = combatMode.moveStartX + dx * moveRatio2;
+                    combatMode.defenderY = combatMode.moveStartY + dy * moveRatio2;
+
+                    // 确保防守者不会离开容器边界
                     const containerRect = combatContainer.getBoundingClientRect();
-                    // 使用 defenderSizePercent 來實時計算 defenderSize
                     const defenderSize = containerRect.width * (combatMode.defenderSizePercent / 100);
                     combatMode.defenderX = Math.max(defenderSize / 2,
-                                                   Math.min(containerRect.width - defenderSize / 2,
-                                                           combatMode.defenderX));
+                                        Math.min(containerRect.width - defenderSize / 2,
+                                               combatMode.defenderX));
                     combatMode.defenderY = Math.max(defenderSize / 2,
-                                                   Math.min(containerRect.height - defenderSize / 2,
-                                                           combatMode.defenderY));
+                                        Math.min(containerRect.height - defenderSize / 2,
+                                               combatMode.defenderY));
 
-                    // Update defender position
+                    // 更新视觉位置
                     defender.style.left = `${combatMode.defenderX}px`;
                     defender.style.top = `${combatMode.defenderY}px`;
-
                 } else {
-                    // Reached target, stop moving
+                    // 到达目标位置，停止移动
                     combatMode.defenderMoving = false;
                 }
             }
@@ -4571,11 +4592,16 @@
 
                         // 停止戰鬥BGM，切换为boardbgm并从头播放
                         stopBattleBGM();
+
+                        // 判断boardbgm状态，如果存在但被暂停，则恢复播放，不重置播放进度
                         if (boardBgmPlayer) {
-                            boardBgmPlayer.currentTime = 0; // 从头播放
-                            boardBgmPlayer.play().catch(err => {
-                                console.log('無法自動恢復關卡背景音樂:', err);
-                            });
+                            // 检查是否已暂停
+                            if (boardBgmPlayer.paused) {
+                                boardBgmPlayer.play().catch(err => {
+                                    console.log('無法自動恢復關卡背景音樂:', err);
+                                });
+                            }
+                            // 如果已经在播放，则不做任何操作
                         }
 
                         // 觸發回合開始事件
