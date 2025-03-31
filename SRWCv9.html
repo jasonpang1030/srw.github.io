@@ -4042,7 +4042,27 @@
         function handleAttackerTouch(e) {
             if (!combatMode.active || !combatMode.isPlayerAttacker || combatMode.bulletFired) return;
             e.preventDefault();
-            shootLaser();
+
+            // 获取触摸点坐标
+            const touch = e.touches[0];
+            const rect = combatContainer.getBoundingClientRect();
+
+            // 更新准星位置
+            combatMode.mouseX = touch.clientX - rect.left;
+            combatMode.mouseY = touch.clientY - rect.top;
+            crosshair.style.left = `${combatMode.mouseX}px`;
+            crosshair.style.top = `${combatMode.mouseY}px`;
+
+            // 准星位置更新后，延迟300毫秒再射击
+            // 这给用户提供了瞄准的时间
+            setTimeout(function() {
+                if (combatMode.active && !combatMode.bulletFired) {
+                    // 显示视觉反馈
+                    crosshair.classList.add('firing');
+                    // 射击
+                    shootLaser();
+                }
+            }, 10);
         }
 
         // Handle defender mouse movement
@@ -4092,12 +4112,15 @@
 
         // Start the defender movement to target
         function startDefenderMovement() {
-            combatMode.defenderMoving = true;
-
-            // Reset defender movement after 200ms (was 500ms)
+            // 添加10ms延迟，确保目标位置更新完全后再开始移动
             setTimeout(() => {
-                combatMode.defenderMoving = false;
-            }, 200); // 200ms maximum move time as requested
+                combatMode.defenderMoving = true;
+
+                // Reset defender movement after 200ms (was 500ms)
+                setTimeout(() => {
+                    combatMode.defenderMoving = false;
+                }, 200); // 200ms maximum move time as requested
+            }, 10);
         }
 
         // Shooting laser (one shot only) - ENHANCED!
@@ -4384,7 +4407,7 @@
                 // Calculate random movement distance based on dodge value
                 // Formula: (dodge值-2)*5% + 10% 的容器寬度
                 // 觸控裝置上減少移動距離，使AI更容易被命中
-                const moveDistanceMultiplier = isTouch ? 0.7 : 1.0;
+                const moveDistanceMultiplier = 1.0;
                 const moveDistancePercent = ((combatMode.defender.dodge - 2) * 5 + 10) * moveDistanceMultiplier;
                 const moveDistance = containerRect.width * (moveDistancePercent / 100);
 
@@ -4412,7 +4435,7 @@
 
             // Perform evasive movement occasionally
             // 觸控裝置上更慢的閃避頻率
-            const evasionInterval = isTouch ? 1200 : 800;
+            const evasionInterval = 800;
 
             const aiInterval = setInterval(() => {
                 if (!combatMode.active) {
@@ -4424,7 +4447,7 @@
             }, evasionInterval);
 
             // Initial evasion with longer delay on touch devices
-            const initialDelay = isTouch ? 700 : 500;
+            const initialDelay = 500;
             setTimeout(chooseEvasiveDirection, initialDelay);
         }
 
@@ -4449,7 +4472,7 @@
             crosshair.style.top = `${combatMode.mouseY}px`;
 
             // 觸控裝置上更慢的追蹤間隔
-            const trackingInterval = isTouch ? 450 : 300;
+            const trackingInterval = 300;
 
             // Start tracking defender - 在觸控裝置上更慢
             const trackInterval = setInterval(() => {
@@ -4462,7 +4485,7 @@
                 const difficultyFactor = 1 - (combatMode.attacker.hit * 0.1);
 
                 // 觸控裝置上使用更大的誤差範圍
-                const errorMultiplier = isTouch ? 500 : 200;
+                const errorMultiplier = 200;
                 const errorX = (Math.random() - 0.5) * errorMultiplier * difficultyFactor;
                 const errorY = (Math.random() - 0.5) * errorMultiplier * difficultyFactor;
 
@@ -4474,8 +4497,8 @@
             }, trackingInterval);
 
             // 觸控裝置上更長的射擊延遲
-            const minDelay = isTouch ? 800 : 500;
-            const maxRandomDelay = isTouch ? 2500 : 2000;
+            const minDelay = 500;
+            const maxRandomDelay = 2000;
             const shootDelay = minDelay + Math.random() * maxRandomDelay;
 
             setTimeout(() => {
