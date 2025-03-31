@@ -616,6 +616,7 @@
             top: 50%;
             left: 0;
             height: 4px;
+            width: 100%; /* 添加此行，确保水平线占满容器宽度 */
             transform: translateY(-50%);
         }
 
@@ -623,6 +624,7 @@
             top: 0;
             left: 50%;
             width: 4px;
+            height: 100%;
             transform: translateX(-50%);
         }
 
@@ -635,6 +637,8 @@
             background-color: rgba(255, 20, 147, 0.5);
             box-shadow: 0 0 10px #FF1493, 0 0 20px #FF1493;
             animation: pulse 1.5s infinite;
+            width: 10px; /* 添加此行，给内圆一个默认宽度 */
+            height: 10px; /* 添加此行，给内圆一个默认高度 */
         }
 
         .defender {
@@ -1744,11 +1748,15 @@
             result: null // 'attacker' or 'defender'
         };
 
-        // 添加BGM相關代碼
+        // 添加BGM及SE相關代碼
         let battleBgmPlayer = null;
         let introMusicPlayer = null;
         let boardBgmPlayer = null;
         let currentBattleBgmType = null;
+
+        let beamGunSound = null;
+        let explosionSound = null;
+        let soundsLoaded = false;
 
         // Game state
         let gameState = {
@@ -1828,6 +1836,9 @@
             }
             // 重置当前BGM类型
             currentBattleBgmType = null;
+            beamGunSound = null;
+            explosionSound = null;
+            soundsLoaded = false;
         }
 
         // 播放遊戲介紹音樂
@@ -1873,17 +1884,11 @@
             // 先停止所有可能正在播放的音樂
             stopIntroMusic();
             stopBattleBGM();
-
-            // 如果已經有在播放的關卡BGM，先停止
-            if (boardBgmPlayer) {
-                boardBgmPlayer.pause();
-                boardBgmPlayer = null;
-            }
+            stopBoardBGM();
 
             // 創建新的音頻播放器
             boardBgmPlayer = new Audio(bgmUrl);
             boardBgmPlayer.loop = true; // 設置循環播放
-            boardBgmPlayer.currentTime = 0; // 确保从头播放（虽然新创建的Audio对象默认就是从头开始）
 
             // 嘗試播放音樂
             try {
@@ -1903,6 +1908,438 @@
                 boardBgmPlayer.currentTime = 0;
                 boardBgmPlayer = null;
             }
+        }
+
+        // 预加载战斗音效
+        function preloadCombatSounds() {
+            // 加载激光枪音效
+            beamGunSound = new Audio('https://cdn.jsdelivr.net/gh/jasonpang1030/srw.github.io@main/SRWCSE_BeamGun.mp3');
+            beamGunSound.load();
+
+            // 加载爆炸音效
+            explosionSound = new Audio('https://cdn.jsdelivr.net/gh/jasonpang1030/srw.github.io@main/SRWCSE_Explosion.mp3');
+            explosionSound.load();
+
+            // 设置加载完成标志
+            soundsLoaded = true;
+
+            console.log('战斗音效预加载完成');
+        }
+
+        // 播放音效的通用函数
+        function playCombatSound(sound) {
+            if (!sound || !soundsLoaded) return;
+
+            try {
+                // 克隆音效对象以支持重叠播放
+                const soundClone = sound.cloneNode();
+                soundClone.volume = 0.7; // 设置音量为70%
+                soundClone.play().catch(err => {
+                    console.log('无法播放音效:', err);
+                });
+            } catch (e) {
+                console.error('播放音效出错:', e);
+            }
+        }
+
+        /**
+         * 将十六进制颜色转换为rgba格式
+         * @param {string} hexColor - 十六进制颜色值 (#RRGGBB 或 #RGB 格式)
+         * @param {number} alpha - 透明度 (0-1)
+         * @return {string} rgba格式的颜色
+         */
+        function hexToRgba(hexColor, alpha = 1) {
+            // 检查是否为空或无效值
+            if (!hexColor || typeof hexColor !== 'string') {
+                return `rgba(255, 20, 147, ${alpha})`; // 默认返回深粉红色
+            }
+
+            // 移除#号并标准化十六进制颜色
+            let hex = hexColor.replace('#', '').trim();
+
+            // 检查是否有效的十六进制值
+            if (!/^[0-9A-Fa-f]{3}$|^[0-9A-Fa-f]{6}$/.test(hex)) {
+                return `rgba(255, 20, 147, ${alpha})`; // 无效时返回默认颜色
+            }
+
+            // 处理简写形式 (#RGB)
+            if (hex.length === 3) {
+                hex = hex.split('').map(char => char + char).join('');
+            }
+
+            // 解析RGB值
+            const r = parseInt(hex.substring(0, 2), 16);
+            const g = parseInt(hex.substring(2, 4), 16);
+            const b = parseInt(hex.substring(4, 6), 16);
+
+            // 返回rgba格式
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+
+        // =================== 多边形碰撞检测工具函数 ===================
+
+        /**
+         * 创建一个多边形对象
+         * @param {Array} points - 多边形顶点数组，格式为 [{x, y}, {x, y}, ...]
+         * @param {number} x - 多边形中心x坐标
+         * @param {number} y - 多边形中心y坐标
+         * @param {number} rotation - 旋转角度（度）
+         * @return {Object} 多边形对象
+         */
+        function createPolygon(points, x, y, rotation = 0) {
+            return {
+                points: points,
+                x: x,
+                y: y,
+                rotation: rotation,
+
+                // 获取变换后的点
+                getTransformedPoints: function() {
+                    // 角度转弧度
+                    const rad = (this.rotation * Math.PI) / 180;
+                    const cos = Math.cos(rad);
+                    const sin = Math.sin(rad);
+
+                    return this.points.map(point => {
+                        // 应用旋转
+                        const rotatedX = point.x * cos - point.y * sin;
+                        const rotatedY = point.x * sin + point.y * cos;
+
+                        // 应用平移
+                        return {
+                            x: rotatedX + this.x,
+                            y: rotatedY + this.y
+                        };
+                    });
+                }
+            };
+        }
+
+        /**
+         * 检测多边形之间是否碰撞（使用分离轴定理SAT）
+         * @param {Object} polygonA - 第一个多边形对象
+         * @param {Object} polygonB - 第二个多边形对象
+         * @return {boolean} 是否碰撞
+         */
+        function polygonsCollide(polygonA, polygonB) {
+            const pointsA = polygonA.getTransformedPoints();
+            const pointsB = polygonB.getTransformedPoints();
+
+            // 获取所有边的法向量作为投影轴
+            const axes = getAxes(pointsA).concat(getAxes(pointsB));
+
+            // 在每个轴上检测投影是否重叠
+            for (let i = 0; i < axes.length; i++) {
+                const axis = axes[i];
+                const projectionA = projectPolygon(pointsA, axis);
+                const projectionB = projectPolygon(pointsB, axis);
+
+                // 如果在任意轴上没有重叠，则多边形不碰撞
+                if (!projectionOverlap(projectionA, projectionB)) {
+                    return false;
+                }
+            }
+
+            // 所有轴上都有重叠，多边形碰撞
+            return true;
+        }
+
+        /**
+         * 获取多边形所有边的法向量
+         * @param {Array} points - 多边形顶点数组
+         * @return {Array} 法向量数组
+         */
+        function getAxes(points) {
+            const axes = [];
+
+            for (let i = 0; i < points.length; i++) {
+                const p1 = points[i];
+                const p2 = points[(i + 1) % points.length];
+
+                // 计算边的法向量
+                const edge = {
+                    x: p2.x - p1.x,
+                    y: p2.y - p1.y
+                };
+
+                // 法向量（垂直于边）
+                const normal = {
+                    x: -edge.y,
+                    y: edge.x
+                };
+
+                // 单位化
+                const length = Math.sqrt(normal.x * normal.x + normal.y * normal.y);
+                normal.x /= length;
+                normal.y /= length;
+
+                axes.push(normal);
+            }
+
+            return axes;
+        }
+
+        /**
+         * 将多边形投影到轴上
+         * @param {Array} points - 多边形顶点
+         * @param {Object} axis - 投影轴
+         * @return {Object} 投影区间 {min, max}
+         */
+        function projectPolygon(points, axis) {
+            let min = Number.MAX_VALUE;
+            let max = -Number.MAX_VALUE;
+
+            points.forEach(point => {
+                // 点在轴上的投影
+                const projection = point.x * axis.x + point.y * axis.y;
+
+                if (projection < min) min = projection;
+                if (projection > max) max = projection;
+            });
+
+            return { min, max };
+        }
+
+        /**
+         * 检查两个投影是否重叠
+         * @param {Object} projectionA - 第一个投影 {min, max}
+         * @param {Object} projectionB - 第二个投影 {min, max}
+         * @return {boolean} 是否重叠
+         */
+        function projectionOverlap(projectionA, projectionB) {
+            return !(projectionA.max < projectionB.min || projectionB.max < projectionA.min);
+        }
+
+        /**
+         * 创建规则多边形
+         * @param {number} sides - 边数
+         * @param {number} radius - 半径
+         * @return {Array} 多边形顶点数组
+         */
+        function createRegularPolygon(sides, radius) {
+            const points = [];
+            const angleStep = (2 * Math.PI) / sides;
+
+            for (let i = 0; i < sides; i++) {
+                const angle = i * angleStep;
+                points.push({
+                    x: radius * Math.cos(angle),
+                    y: radius * Math.sin(angle)
+                });
+            }
+
+            return points;
+        }
+
+        /**
+         * 从SVG路径创建多边形
+         * @param {string} svgPath - SVG路径字符串
+         * @param {number} scale - 缩放因子
+         * @return {Array} 多边形顶点数组
+         */
+        function createPolygonFromSVG(svgPath, scale = 1) {
+            // 注意：这是简化版，只支持简单的移动和直线命令
+            // 完整实现需要SVG路径解析库
+            const points = [];
+            const commands = svgPath.match(/[MLZ][^MLZ]*/g) || [];
+
+            commands.forEach(cmd => {
+                const type = cmd[0];
+                const coords = cmd.slice(1).trim().split(/[\s,]+/).map(Number);
+
+                if (type === 'M' || type === 'L') {
+                    for (let i = 0; i < coords.length; i += 2) {
+                        if (i + 1 < coords.length) {
+                            points.push({
+                                x: coords[i] * scale,
+                                y: coords[i + 1] * scale
+                            });
+                        }
+                    }
+                }
+            });
+
+            return points;
+        }
+
+        /**
+         * 创建指定类型的准星元素
+         * @param {string} type - 准星类型
+         * @param {string} color - 准星颜色（十六进制）
+         * @param {number} size - 准星大小
+         * @return {HTMLElement} 准星DOM元素
+         */
+        function createCrosshair(type, color, size) {
+            // 创建准星容器
+            const container = document.createElement('div');
+            container.className = 'crosshair';
+            container.style.width = `${size}px`;
+            container.style.height = `${size}px`;
+
+            // 解析颜色
+            const rgbaColor = hexToRgba(color, 1);
+            const rgbaColorFaint = hexToRgba(color, 0.5);
+
+            // 计算参数
+            const lineThickness = Math.max(2, Math.floor(size / 50)); // 线条最小2px
+            const outerSize = Math.round(size * 0.8); // 外框大小为容器大小的80%
+            const borderWidth = Math.max(2, Math.floor(size / 40)); // 边框宽度最小2px
+            const dotSize = Math.max(4, Math.floor(size / 15)); // 中心点大小
+
+            switch (type) {
+                case 'circle':
+                    // 圆形外框准星
+                    container.innerHTML = `
+                        <div class="crosshair-frame" style="
+                            position: absolute;
+                            top: 50%;
+                            left: 50%;
+                            width: ${outerSize}px;
+                            height: ${outerSize}px;
+                            border: ${borderWidth}px solid ${rgbaColor};
+                            border-radius: 50%;
+                            transform: translate(-50%, -50%);
+                            box-shadow: 0 0 10px ${color};
+                            pointer-events: none;
+                        "></div>
+                        <div class="crosshair-horizontal" style="
+                            position: absolute;
+                            top: 50%;
+                            left: 0;
+                            width: 100%;
+                            height: ${lineThickness}px;
+                            background: linear-gradient(90deg, ${hexToRgba(color, 0)} 0%, ${rgbaColor} 50%, ${hexToRgba(color, 0)} 100%);
+                            transform: translateY(-50%);
+                            pointer-events: none;
+                        "></div>
+                        <div class="crosshair-vertical" style="
+                            position: absolute;
+                            top: 0;
+                            left: 50%;
+                            width: ${lineThickness}px;
+                            height: 100%;
+                            background: linear-gradient(0deg, ${hexToRgba(color, 0)} 0%, ${rgbaColor} 50%, ${hexToRgba(color, 0)} 100%);
+                            transform: translateX(-50%);
+                            pointer-events: none;
+                        "></div>
+                        <div class="crosshair-dot" style="
+                            position: absolute;
+                            top: 50%;
+                            left: 50%;
+                            width: ${dotSize}px;
+                            height: ${dotSize}px;
+                            background-color: ${rgbaColor};
+                            border-radius: 50%;
+                            transform: translate(-50%, -50%);
+                            box-shadow: 0 0 5px ${color};
+                            pointer-events: none;
+                        "></div>
+                    `;
+                    break;
+
+                case 'ver_rectangle':
+                    // 垂直长方形准星 (宽:高 = 1:6)
+                    const frameWidth = Math.round(outerSize * 0.4); // 减小宽度以保持合理比例
+                    const frameHeight = frameWidth * 6; // 高度是宽度的6倍
+
+                    container.innerHTML = `
+                        <div class="crosshair-frame" style="
+                            position: absolute;
+                            top: 50%;
+                            left: 50%;
+                            width: ${frameWidth}px;
+                            height: ${frameHeight}px;
+                            border: ${borderWidth}px solid ${rgbaColor};
+                            transform: translate(-50%, -50%);
+                            box-shadow: 0 0 10px ${color};
+                            pointer-events: none;
+                        "></div>
+                        <div class="crosshair-horizontal" style="
+                            position: absolute;
+                            top: 50%;
+                            left: 0;
+                            width: 100%;
+                            height: ${lineThickness}px;
+                            background: linear-gradient(90deg, ${hexToRgba(color, 0)} 0%, ${rgbaColor} 50%, ${hexToRgba(color, 0)} 100%);
+                            transform: translateY(-50%);
+                            pointer-events: none;
+                        "></div>
+                        <div class="crosshair-vertical" style="
+                            position: absolute;
+                            top: 0;
+                            left: 50%;
+                            width: ${lineThickness}px;
+                            height: 100%;
+                            background: linear-gradient(0deg, ${hexToRgba(color, 0)} 0%, ${rgbaColor} 50%, ${hexToRgba(color, 0)} 100%);
+                            transform: translateX(-50%);
+                            pointer-events: none;
+                        "></div>
+                        <div class="crosshair-dot" style="
+                            position: absolute;
+                            top: 50%;
+                            left: 50%;
+                            width: ${dotSize}px;
+                            height: ${dotSize}px;
+                            background-color: ${rgbaColor};
+                            transform: translate(-50%, -50%);
+                            box-shadow: 0 0 5px ${color};
+                            pointer-events: none;
+                        "></div>
+                    `;
+                    break;
+
+                case 'diamond':
+                    // 菱形外框准星
+                    container.innerHTML = `
+                        <div class="crosshair-frame" style="
+                            position: absolute;
+                            top: 50%;
+                            left: 50%;
+                            width: ${outerSize * 0.7}px;
+                            height: ${outerSize * 0.7}px;
+                            border: ${borderWidth}px solid ${rgbaColor};
+                            transform: translate(-50%, -50%) rotate(45deg);
+                            box-shadow: 0 0 10px ${color};
+                            pointer-events: none;
+                        "></div>
+                        <div class="crosshair-horizontal" style="
+                            position: absolute;
+                            top: 50%;
+                            left: 0;
+                            width: 100%;
+                            height: ${lineThickness}px;
+                            background: linear-gradient(90deg, ${hexToRgba(color, 0)} 0%, ${rgbaColor} 50%, ${hexToRgba(color, 0)} 100%);
+                            transform: translateY(-50%);
+                            pointer-events: none;
+                        "></div>
+                        <div class="crosshair-vertical" style="
+                            position: absolute;
+                            top: 0;
+                            left: 50%;
+                            width: ${lineThickness}px;
+                            height: 100%;
+                            background: linear-gradient(0deg, ${hexToRgba(color, 0)} 0%, ${rgbaColor} 50%, ${hexToRgba(color, 0)} 100%);
+                            transform: translateX(-50%);
+                            pointer-events: none;
+                        "></div>
+                        <div class="crosshair-dot" style="
+                            position: absolute;
+                            top: 50%;
+                            left: 50%;
+                            width: ${dotSize}px;
+                            height: ${dotSize}px;
+                            background-color: ${rgbaColor};
+                            transform: translate(-50%, -50%) rotate(45deg);
+                            box-shadow: 0 0 5px ${color};
+                            pointer-events: none;
+                        "></div>
+                    `;
+                    break;
+
+                // ...其他准星类型保持不变...
+            }
+
+            return container;
         }
 
         // CSV加載相關功能
@@ -1978,7 +2415,10 @@
                                 hit: parseInt(entry.hit) || 3,
                                 dodge: parseInt(entry.dodge) || 3,
                                 atktype: parseInt(entry.atktype) || 1,
-                                bgmtype: entry.bgmtype || ''
+                                bgmtype: entry.bgmtype || '',
+                                weapon_colour: entry.weapon_colour || '',
+                                crosshairType: entry.crosshair_type || 'circle', // 准星形状类型
+                                crosshairSvgPath: entry.crosshair_svg_path || '' // 自定义SVG路径
                             };
                         }
                         break;
@@ -3377,18 +3817,17 @@
                 gameState.turnCount++;
                 console.log(`回合數增加到: ${gameState.turnCount}`);
 
-                // 回合数增加时，停止战斗BGM，切换为boardbgm并从头播放
+                // 检查是否正在播放战斗BGM
+                const wasBattleBgmPlaying = battleBgmPlayer !== null;
                 stopBattleBGM();
 
-                // 判断boardbgm状态，如果存在但被暂停，则恢复播放，不重置播放进度
-                if (boardBgmPlayer) {
-                    // 检查是否已暂停（paused属性为true表示当前已暂停）
-                    if (boardBgmPlayer.paused) {
-                        boardBgmPlayer.play().catch(err => {
-                            console.log('無法自動恢復關卡背景音樂:', err);
-                        });
+                // 只有在之前正在播放战斗BGM时才从头播放boardbgm
+                if (wasBattleBgmPlaying && levelManager && levelManager.currentLevel) {
+                    // 从头播放关卡BGM
+                    const currentLevelData = window.levelData.find(level => level.id === levelManager.currentLevel);
+                    if (currentLevelData && currentLevelData.boardbgm) {
+                        playBoardBGM(currentLevelData.boardbgm);
                     }
-                    // 如果已经在播放，则不做任何操作，让它继续播放
                 }
 
                 // 觸發回合開始事件
@@ -3702,6 +4141,7 @@
         // Start combat mode with introduction window
         function startCombat(attackerPiece, defenderPiece, attackerPos, defenderPos) {
             // Store combat information
+            preloadCombatSounds();
             combatMode.active = true;
             combatMode.attacker = attackerPiece;
             combatMode.defender = defenderPiece;
@@ -3851,15 +4291,21 @@
                         crosshair.style.width = `${crosshairSizePercent}%`;
                         crosshair.style.height = `${crosshairSizePercent}%`;
 
+                        // 获取武器颜色和准星类型
+                        const weaponColor = attackerPiece.weapon_colour || '#FF1493'; // 默认深粉红色
+                        // const crosshairType = attackerPiece.crosshairType || 'circle'; // 默认圆形
+                        const crosshairType = 'ver_rectangle'; // 默认圆形
 
+                        // 删除旧的准星内容
+                        while (crosshair.firstChild) {
+                            crosshair.removeChild(crosshair.firstChild);
+                        }
 
-                        // 設置內部十字準星尺寸為外部的75%
-                        crosshair.querySelector('.crosshair-inner').style.width = `75%`;
-                        crosshair.querySelector('.crosshair-inner').style.height = `75%`;
+                        // 创建新的准星元素
+                        const newCrosshair = createCrosshair(crosshairType, weaponColor, combatMode.crosshairSize);
 
-                        // 設置十字準星線條與整體容器一致
-                        crosshair.querySelector('.crosshair-horizontal').style.width = `100%`;
-                        crosshair.querySelector('.crosshair-vertical').style.height = `100%`;
+                        // 将新准星的内容添加到现有准星容器
+                        crosshair.innerHTML = newCrosshair.innerHTML;
 
                         // 設置防守者尺寸為容器寬度的百分比
                         defender.style.width = `${combatMode.defenderSizePercent}%`;
@@ -3952,11 +4398,7 @@
                         defender.style.top = `${combatMode.defenderY}px`;
 
                         // 初始化防守者坐標完成
-
-                        // 在戰鬥前暫停關卡背景音樂，但不清除它，以便戰鬥結束後可以繼續播放
-                        if (boardBgmPlayer) {
-                            boardBgmPlayer.pause();
-                        }
+                        stopBoardBGM();
 
                         // Start crosshair near the defender but not directly on it
                         if (combatMode.isPlayerAttacker) {
@@ -4140,6 +4582,12 @@
 
             combatMode.bulletFired = true;
 
+            // 播放激光枪音效
+            playCombatSound(beamGunSound);
+
+            // 获取当前攻击者的武器颜色
+            const weaponColor = combatMode.attacker.weapon_colour || '#FF1493'; // 默认深粉红色
+
             const containerRect = combatContainer.getBoundingClientRect();
 
             // Create multiple laser beams for a more spectacular effect
@@ -4162,6 +4610,10 @@
                     laser.style.height = `${Math.random() * 3 + 5}px`; // Thicker lasers (5-8px)
                     laser.style.transform = `rotate(${angle}deg)`;
 
+                    // 使用棋子的武器颜色设置激光样式
+                    laser.style.background = `linear-gradient(90deg, ${hexToRgba(weaponColor, 0.5)} 0%, ${hexToRgba(weaponColor, 1)} 50%, ${hexToRgba(weaponColor, 0.5)} 100%)`;
+                    laser.style.boxShadow = `0 0 10px ${weaponColor}, 0 0 20px ${weaponColor}`;
+
                     combatContainer.appendChild(laser);
 
                     // Add a glow effect behind the laser
@@ -4172,6 +4624,9 @@
                     glow.style.width = `${length}px`;
                     glow.style.height = `${Math.random() * 10 + 20}px`; // Thicker glow
                     glow.style.transform = `rotate(${angle}deg)`;
+
+                    // 设置光晕颜色
+                    glow.style.background = hexToRgba(weaponColor, 0.1);
 
                     combatContainer.appendChild(glow);
 
@@ -4197,42 +4652,115 @@
             }, 150); // 延遲150毫秒進行命中判定
         }
 
-        // Check if laser hit the defender
+        // 检查是否命中
         function checkHit() {
             const containerRect = combatContainer.getBoundingClientRect();
 
-            // 計算實際的防守者尺寸（基於容器寬度的百分比）
-            const defenderSize = containerRect.width * (combatMode.defenderSizePercent / 100);
-
-            // 計算防守者圓形判定區域的半徑
-            const defenderRadius = defenderSize / 2;
-
-            // 計算準星圓形判定區域的半徑
-            const crosshairRadius = combatMode.crosshairSize / 2;
-
-            // 計算兩個圓心的位置
+            // 计算防守者中心位置
             const defenderCenterX = combatMode.defenderX;
             const defenderCenterY = combatMode.defenderY;
+
+            // 计算准星中心位置
             const crosshairCenterX = combatMode.mouseX;
             const crosshairCenterY = combatMode.mouseY;
 
-            // 計算兩個圓心之間的距離
-            const dx = crosshairCenterX - defenderCenterX;
-            const dy = crosshairCenterY - defenderCenterY;
-            const distance = Math.sqrt(dx * dx + dy * dy);
+            // 计算防守者大小和准星大小
+            const defenderSize = containerRect.width * (combatMode.defenderSizePercent / 100);
+            const defenderRadius = defenderSize / 2;
+            const crosshairRadius = combatMode.crosshairSize / 2;
 
-            // 圓形碰撞檢測：如果兩圓心距離小於兩圓半徑之和，則判定為命中
-            if (distance < (defenderRadius + crosshairRadius)) {
-                // Hit! Create explosion effect
-                createExplosion(combatMode.defenderX, combatMode.defenderY);
+            // 使用当前准星形状（默认是圆形）
+            const crosshairType = combatMode.attacker.crosshairType || 'circle';
 
-                // Attacker wins
-                endCombat('attacker');
+            // 根据准星类型创建不同的碰撞形状
+            let hitDetected = false;
+
+            if (crosshairType === 'circle' || !crosshairType) {
+                // 使用简单的圆形碰撞检测（原有的方法）
+                const dx = crosshairCenterX - defenderCenterX;
+                const dy = crosshairCenterY - defenderCenterY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                hitDetected = distance < (defenderRadius + crosshairRadius);
+            } else {
+                // 使用多边形碰撞检测
+                let crosshairPoints;
+                let defenderPoints;
+
+                // 创建防守者的碰撞形状（通常是圆形）
+                defenderPoints = createRegularPolygon(8, defenderRadius); // 用8边形近似圆形
+
+                // 根据准星类型创建不同形状
+                switch (crosshairType) {
+                    case 'square':
+                        // 创建正方形准星
+                        const halfSize = crosshairRadius * 0.8; // 稍微缩小以匹配视觉大小
+                        crosshairPoints = [
+                            {x: -halfSize, y: -halfSize},
+                            {x: halfSize, y: -halfSize},
+                            {x: halfSize, y: halfSize},
+                            {x: -halfSize, y: halfSize}
+                        ];
+                        break;
+
+                    case 'diamond':
+                        // 创建菱形准星
+                        const diamondSize = crosshairRadius * 1.2;
+                        crosshairPoints = [
+                            {x: 0, y: -diamondSize},
+                            {x: diamondSize, y: 0},
+                            {x: 0, y: diamondSize},
+                            {x: -diamondSize, y: 0}
+                        ];
+                        break;
+
+                    case 'triangle':
+                        // 创建三角形准星
+                        const triangleSize = crosshairRadius * 1.3;
+                        crosshairPoints = [
+                            {x: 0, y: -triangleSize},
+                            {x: triangleSize * 0.866, y: triangleSize * 0.5}, // cos(30°), sin(30°)
+                            {x: -triangleSize * 0.866, y: triangleSize * 0.5}
+                        ];
+                        break;
+
+                    case 'custom':
+                        // 使用自定义SVG形状（如果有）
+                        if (combatMode.attacker.crosshairSvgPath) {
+                            crosshairPoints = createPolygonFromSVG(combatMode.attacker.crosshairSvgPath, 1);
+                        } else {
+                            // 默认回退到圆形
+                            crosshairPoints = createRegularPolygon(16, crosshairRadius);
+                        }
+                        break;
+
+                    default:
+                        // 默认使用圆形（用16边形近似）
+                        crosshairPoints = createRegularPolygon(16, crosshairRadius);
+                }
+
+                // 创建多边形对象
+                const crosshairPolygon = createPolygon(crosshairPoints, crosshairCenterX, crosshairCenterY, 0);
+                const defenderPolygon = createPolygon(defenderPoints, defenderCenterX, defenderCenterY, 0);
+
+                // 检测碰撞
+                hitDetected = polygonsCollide(crosshairPolygon, defenderPolygon);
             }
+
+            // 如果命中，创建爆炸效果
+            if (hitDetected) {
+                createExplosion(defenderCenterX, defenderCenterY);
+                endCombat('attacker');
+                return true;
+            }
+
+            return false;
         }
 
         // 創建爆炸效果 - 百分比方式！
         function createExplosion(x, y) {
+            // 播放爆炸音效
+            playCombatSound(explosionSound);
+
             // 主爆炸
             const explosion = document.createElement('div');
             explosion.className = 'explosion';
@@ -4590,18 +5118,17 @@
                         gameState.turnCount++;
                         console.log(`防守成功後回合數增加到: ${gameState.turnCount}`);
 
-                        // 停止戰鬥BGM，切换为boardbgm并从头播放
+                        // 检查是否正在播放战斗BGM
+                        const wasBattleBgmPlaying = battleBgmPlayer !== null;
                         stopBattleBGM();
 
-                        // 判断boardbgm状态，如果存在但被暂停，则恢复播放，不重置播放进度
-                        if (boardBgmPlayer) {
-                            // 检查是否已暂停
-                            if (boardBgmPlayer.paused) {
-                                boardBgmPlayer.play().catch(err => {
-                                    console.log('無法自動恢復關卡背景音樂:', err);
-                                });
+                        // 只有在之前正在播放战斗BGM时才从头播放boardbgm
+                        if (wasBattleBgmPlaying && levelManager && levelManager.currentLevel) {
+                            // 从头播放关卡BGM
+                            const currentLevelData = window.levelData.find(level => level.id === levelManager.currentLevel);
+                            if (currentLevelData && currentLevelData.boardbgm) {
+                                playBoardBGM(currentLevelData.boardbgm);
                             }
-                            // 如果已经在播放，则不做任何操作
                         }
 
                         // 觸發回合開始事件
@@ -5030,6 +5557,9 @@
                             dodge: pieceDefinition.dodge,
                             atktype: pieceDefinition.atktype || 1,
                             bgmtype: pieceDefinition.bgmtype || '',
+                            weapon_colour: pieceDefinition.weapon_colour || '',
+                            crosshairType: pieceDefinition.crosshair_type || 'circle',
+                            crosshairSvgPath: pieceDefinition.crosshair_svg_path || '',
                             hasMoved: false
                         };
                     });
@@ -6218,7 +6748,7 @@
 
             // 指定CSV URL
             // const csvUrl = "https://cdn.jsdelivr.net/gh/jasonpang1030/srw.github.io@refs/heads/main/SRWCStage01v4.csv";
-            const csvUrl = "https://cdn.jsdelivr.net/gh/jasonpang1030/srw.github.io@refs/heads/main/eventtestv7.csv";
+            const csvUrl = "https://cdn.jsdelivr.net/gh/jasonpang1030/srw.github.io@refs/heads/main/eventtestv9.csv";
 
             // 隱藏封面頁面
             coverPage.classList.add('hide');
