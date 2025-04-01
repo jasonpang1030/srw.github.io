@@ -64,7 +64,7 @@ initial_position,guncannon_1,,,,,,,,,,,,,,,,6,1,,,,,,,,,,,,,,,,,,,,,,,,,,,
 initial_position,guncannon_2,,,,,,,,,,,,,,,,6,3,,,,,,,,,,,,,,,,,,,,,,,,,,,
 initial_position,guncannon_3,,,,,,,,,,,,,,,,6,5,,,,,,,,,,,,,,,,,,,,,,,,,,,
 initial_position,guncannon_4,,,,,,,,,,,,,,,,6,7,,,,,,,,,,,,,,,,,,,,,,,,,,,
+initial_position,g_sky_1,,,,,,,,,,,,,,,,6,0,,,,,,,,,,,,,,,,,,,,,,,,,,,
 condition,victory,,,,,,,,,,,,,,,,,,captureKing,消滅敵方旗艦「沙達拉恩號」,,,,,,,,,,,,,,,,,,,,,,,,,
 condition,defeat,,,,,,,,,,,,,,,,,,kingCaptured,我方旗艦「勞·卡拉姆號」被摧毀,,,,,,,,,,,,,,,,,,,,,,,,,
-event,,,,,,,,,,,,,,,,,,,,,pieceCaptured,,red,zaku_ii_8,,,spawnPiece,sazabi,2,0,,TRUE,TRUE,飛翼零式高達已現身！,作戰指揮部偵測到一台不明高達型機體正在接近戰場，分析顯示其友方信號。此機體即將加入我方作戰！,確定,,,,,,,,,TRUE
-event,,,,,,,,,,,,,,,,,,,,,pieceCaptured,,red,zaku_ii_8,,,spawnPiece,sazabi,2,0,,TRUE,TRUE,飛翼零式高達已現身！,作戰指揮部偵測到一台不明高達型機體正在接近戰場，分析顯示其友方信號。此機體即將加入我方作戰！,確定,,,,,,,,,TRUE
+event,,,,,,,,,,,,,,,,,,,,,turnStart,4,blue,,,,spawnPiece,wing_zero_gundam,5,0,,TRUE,TRUE,飛翼零式高達已現身！,作戰指揮部偵測到一台不明高達型機體正在接近戰場，分析顯示其友方信號。此機體即將加入我方作戰！,確定,,,,,,,,,TRUE
